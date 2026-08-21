@@ -8,14 +8,21 @@ import { definePluginSettings } from "@api/Settings";
 import { OptionType } from "@utils/types";
 
 import { KeyringManager } from "./components/KeyringManager";
+import { SignedChannelsManager } from "./components/SignedChannelsManager";
 import { TrustedSignersManager } from "./components/TrustedSignersManager";
 import { SigningKeyPicker } from "./components/SigningKeyPicker";
 
 export const settings = definePluginSettings({
-    signOutgoing: {
+    signedChannels: {
+        type: OptionType.COMPONENT,
+        description: "Channels where you sign",
+        component: SignedChannelsManager
+    },
+    offerOnPublicKey: {
         type: OptionType.BOOLEAN,
-        description: "Sign outgoing messages automatically",
-        default: false // opt-in: signing pops a YubiKey prompt on every single message
+        description: "When someone shares a public key, offer to import it and to sign in that conversation",
+        // An offer, never an action: the buttons are the only thing that imports or enables anything.
+        default: true
     },
     signingKey: {
         type: OptionType.COMPONENT,

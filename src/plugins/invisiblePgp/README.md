@@ -11,13 +11,26 @@ cp -r <this-folder> src/plugins/invisiblePgp
 pnpm build --dev && pnpm inject      # Vencord Desktop is required to sign
 ```
 
-Then, in Discord: Settings → Vencord → Plugins → **InvisiblePGP**, and turn on "sign outgoing
-messages automatically". That is the only required setting.
+Then, in Discord, right-click a channel or a DM and pick **"Sign messages here"**. Signing is off
+everywhere until you do that, per conversation.
 
 Everything else configures itself at startup: the `gpg` binary is located by probing (PATH first,
 then the default Gpg4win and Homebrew install locations), and the signing key is picked without
 asking whenever the choice is unambiguous — a key on a smartcard always wins, since that is the one
 you plugged in on purpose. The "gpg path" and "signing key" fields exist only to override this.
+
+## Where signing is on
+
+Signing is opt-in **per channel**, never global. A signature is permanent, transferable proof of
+what you wrote (see "What this does not do" below), so it belongs on the conversations you picked,
+not on everything you type. The list of enabled channels lives in `channelPolicy.ts` and is
+reviewable in the settings.
+
+The plugin never switches signing on by itself. When someone shares a public key — inline, or as a
+`.asc` / `.gpg` / `.pgp` / `.key` attachment — a small card appears under their message offering to
+**add the key to your keyring** and to **start signing in that conversation**. Both are buttons.
+Detection is local and synchronous: an attachment is recognised by its name, and only downloaded
+(with a 256 KB cap) once you press the button.
 
 ## How it works
 
@@ -83,10 +96,12 @@ Automatic pinning can be turned off, and the list is editable by hand in the set
 | `native.bridge.ts` | renderer-side view of the native module; degrades cleanly off Desktop |
 | `zeroWidth.ts` | `encodeSignatureToZeroWidth` / `decodeZeroWidthToSignature`, frame, length guard |
 | `binding.ts` | canonical signed form: channel + author + timestamp + text |
+| `channelPolicy.ts` | which channels signing is switched on for |
+| `publicKeyDetection.ts` | spotting a shared public key, inline or as an attachment |
 | `trustedSigners.ts` | pinned keys per account, trust-on-first-use, key substitution checks |
 | `verify.ts` | openpgp.js, context checks, per-message cache, deduplicated verifications |
 | `keyResolver.ts` | DataStore keyring, WKD (z-base-32/SHA-1), negative cache |
-| `components/` | inline badge and settings UI (key picker, public key import, expected signers) |
+| `components/` | inline badge, public key offer card, settings UI |
 
 ## Test benches (`tools/`, outside Vencord)
 
@@ -113,6 +128,16 @@ cryptographically. `REPLAYED` is reserved for the one decidable case: timestamp 
 
 Failure behaviour is configurable: **fail-closed** (send cancelled, the default) or fail-open (the
 message goes out in the clear).
+
+## What this does not do
+
+A signature is positive proof: it establishes what you *did* write, never what you did not. It is
+also **transferable** — whoever holds a signed message can prove its authorship to anyone else,
+forever, out of context. That is the opposite of what Signal and OTR provide, where per-message
+authentication is symmetric and therefore deniable.
+
+This is why signing is per-channel and off by default: sign what you would want to be able to
+prove, not your everyday conversation.
 
 ## Known limitations
 

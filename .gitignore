@@ -4,4 +4,9 @@ tools/test-gpghome/
 
 node_modules/
 tools/.zeroWidth.build.mjs
+
+# Built test fixtures
 src/plugins/invisiblePgp/__tests__/zeroWidth.mjs
+src/plugins/invisiblePgp/__tests__/channelPolicy.mjs
+src/plugins/invisiblePgp/__tests__/publicKeyDetection.mjs
+src/plugins/invisiblePgp/__tests__/datastore-stub.mjs

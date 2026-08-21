@@ -31,9 +31,20 @@ cp -r <this-repo>/src/plugins/invisiblePgp src/plugins/
 pnpm build --dev && pnpm inject      # Vencord Desktop is required to sign
 ```
 
-In Discord: Settings → Vencord → Plugins → **InvisiblePGP**, then turn on "sign outgoing messages".
-That is the only setting you have to touch — `gpg` is located by probing, and the signing key is
-picked automatically whenever the choice is unambiguous (a key on a smartcard always wins).
+In Discord, right-click a channel or a DM and pick **"Sign messages here"**. That is the only thing
+you have to do — `gpg` is located by probing, and the signing key is picked automatically whenever
+the choice is unambiguous (a key on a smartcard always wins).
+
+## Signing is per conversation
+
+Signing is off everywhere until you switch it on for a specific channel or DM, and it is never
+global. That is deliberate, and the reason is in the next section: a signature is permanent,
+transferable proof of what you wrote, so it belongs on the conversations you chose.
+
+The plugin never enables anything on its own. When someone shares a public key — inline or as a
+`.asc` attachment — a card appears under their message offering to add the key to your keyring and
+to start signing in that conversation. Both are buttons; nothing is downloaded or imported until
+you press one.
 
 ## What this does and does not protect against
 
@@ -59,9 +70,16 @@ write. It can never establish what they did *not* write.
 - **clients that strip invisible characters** (some bots, Matrix/IRC bridges): the message stays
   readable, but the signature is lost and the badge turns red.
 
-And one consequence to accept: signing makes your messages **non-repudiable**. A message you really
-did send becomes provable forever, to anyone, out of context. Signal and OTR deliberately avoid
-this. Here you are creating that proof on purpose.
+And one consequence to accept: signing makes your messages **non-repudiable**. Signal and OTR
+authenticate messages too, but symmetrically — your correspondent knows it is you, and can prove it
+to nobody, because they could have forged the whole transcript themselves. A PGP signature is
+asymmetric: whoever holds the message can prove its authorship to any third party, forever, out of
+context. Context binding sharpens that proof rather than softening it — it pins the channel and the
+minute as well as the text.
+
+Revoking or deleting your key does not undo it: revocation signals distrust going forward, it does
+not invalidate past signatures. This is why signing is per-channel and off by default. Sign what you
+would want to be able to prove.
 
 ## Expected signers
 

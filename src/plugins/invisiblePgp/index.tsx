@@ -6,13 +6,16 @@
 
 import "./styles.css";
 
+import { addContextMenuPatch, NavContextMenuPatchCallback, removeContextMenuPatch } from "@api/ContextMenu";
 import { addPreSendListener, removePreSendListener, MessageSendListener } from "@api/MessageEvents";
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
-import { showToast, Toasts, UserStore } from "@webpack/common";
+import { Menu, showToast, Toasts, UserStore } from "@webpack/common";
 import type { Message } from "discord-types/general";
 
 import { canonicalSignedText, isUsableContext } from "./binding";
+import { isChannelSigned, loadChannelPolicy, toggleChannelSigned } from "./channelPolicy";
+import { PublicKeyOffer } from "./components/PublicKeyOffer";
 import { SignatureBadge } from "./components/SignatureBadge";
 import { loadKeyring } from "./keyResolver";
 import { loadTrustedSigners } from "./trustedSigners";
@@ -46,7 +49,8 @@ function fail(reason: string): { cancel: boolean; } {
 }
 
 const onBeforeSend: MessageSendListener = async (channelId, msg) => {
-    if (!settings.store.signOutgoing) return;
+    // Off everywhere until this channel was explicitly switched on.
+    if (!isChannelSigned(channelId)) return;
 
     const content = msg.content ?? "";
     if (!content.trim()) return;
@@ -108,17 +112,11 @@ const onBeforeSend: MessageSendListener = async (channelId, msg) => {
  */
 async function autoConfigure(): Promise<void> {
     if (!isDesktop) {
-        if (settings.store.signOutgoing)
-            showToast("InvisiblePGP: signing needs Vencord Desktop. Verification still works.", Toasts.Type.MESSAGE);
         return;
     }
 
     const gpg = await Native.whereIsGpg(settings.store.gpgPath);
-    if (!gpg) {
-        if (settings.store.signOutgoing)
-            showToast("InvisiblePGP: gpg not found, messages will go out unsigned.", Toasts.Type.FAILURE);
-        return;
-    }
+    if (!gpg) return;
 
     if (settings.store.signingKeyId) return;
 
@@ -129,6 +127,31 @@ async function autoConfigure(): Promise<void> {
     settings.store.signingKeyId = chosen.keyId;
     showToast(`InvisiblePGP: signing key ${chosen.uid}${chosen.onCard ? " (smartcard)" : ""}`, Toasts.Type.SUCCESS);
 }
+
+
+/** Right-click targets that carry a channel: text channels, DMs and group DMs. */
+const CHANNEL_MENUS = ["channel-context", "user-context", "gdm-context", "thread-context"];
+
+const signHerePatch: NavContextMenuPatchCallback = (children, props: any) => {
+    const channelId = props?.channel?.id ?? props?.channelId;
+    if (!channelId) return;
+
+    const on = isChannelSigned(channelId);
+
+    children.push(
+        <Menu.MenuItem
+            id="vc-ipgp-sign-here"
+            label={on ? "Stop signing here" : "Sign messages here"}
+            action={async () => {
+                const next = await toggleChannelSigned(channelId);
+                showToast(
+                    next ? "Signing on for this conversation." : "Signing off for this conversation.",
+                    next ? Toasts.Type.SUCCESS : Toasts.Type.MESSAGE
+                );
+            }}
+        />
+    );
+};
 
 export default definePlugin({
     name: "InvisiblePGP",
@@ -142,12 +165,15 @@ export default definePlugin({
     start() {
         void loadKeyring();
         void loadTrustedSigners();
+        void loadChannelPolicy();
         addPreSendListener(onBeforeSend);
+        for (const menu of CHANNEL_MENUS) addContextMenuPatch(menu, signHerePatch);
         void autoConfigure();
     },
 
     stop() {
         removePreSendListener(onBeforeSend);
+        for (const menu of CHANNEL_MENUS) removeContextMenuPatch(menu, signHerePatch);
         clearCache();
     },
 
@@ -156,11 +182,18 @@ export default definePlugin({
         MESSAGE_UPDATE({ message }: { message: Message; }) {
             if (message?.id) invalidate(message.id);
         }
+
     },
 
     /**
      * Rendered inline next to the message. Vencord calls this for every message it renders, so the
      * component itself owns the caching — see verify.ts.
      */
-    renderMessageDecoration: (props: { message: Message; }) => <SignatureBadge message={props.message} />
+    renderMessageDecoration: (props: { message: Message; }) => <SignatureBadge message={props.message} />,
+
+    /**
+     * Shown under a message carrying a public key: an offer to import it and to start signing in
+     * this conversation. Buttons only -- the plugin never acts on an incoming key by itself.
+     */
+    renderMessageAccessory: (props: { message: Message; }) => <PublicKeyOffer message={props.message} />
 });

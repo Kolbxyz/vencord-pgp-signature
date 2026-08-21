@@ -38,3 +38,26 @@
     font-weight: 400;
     opacity: 0.45;
 }
+
+.vc-ipgp-offer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 32rem;
+    margin-top: 0.25rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--background-modifier-accent, #4f545c);
+    border-left: 3px solid var(--text-positive, #3ba55d);
+    border-radius: 4px;
+    background: var(--background-secondary, #2b2d31);
+}
+
+.vc-ipgp-offer-title {
+    font-size: 0.85rem;
+}
+
+.vc-ipgp-offer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
