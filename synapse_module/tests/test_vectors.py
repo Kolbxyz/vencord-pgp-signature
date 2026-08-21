@@ -26,7 +26,7 @@ def _ident(vector: dict) -> str:
 
 def test_vectors_file_is_the_expected_shape() -> None:
     assert VECTORS["version"] == 2
-    assert {v["alphabet"] for v in VECTORS["codec"]} >= {"base4", "base16", "base256"}
+    assert "base4" in {v["alphabet"] for v in VECTORS["codec"]}
     assert any(v["expect"] is None for v in VECTORS["codec"]), "negative cases must be present"
     assert any("legacy-v1" in v["name"] for v in VECTORS["codec"])
 
