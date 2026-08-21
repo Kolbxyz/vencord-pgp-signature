@@ -1,12 +1,17 @@
-# GnuPG test keyring -- holds a passphrase-less PRIVATE KEY.
-# Must never be committed.
+# Test keyring: holds a passphrase-less private key. Never publish this.
 tools/test-gpghome/
 
+# Dependencies
 node_modules/
-tools/.zeroWidth.build.mjs
+synapse_module/.venv/
 
-# Built test fixtures
-src/plugins/invisiblePgp/__tests__/zeroWidth.mjs
-src/plugins/invisiblePgp/__tests__/channelPolicy.mjs
-src/plugins/invisiblePgp/__tests__/publicKeyDetection.mjs
-src/plugins/invisiblePgp/__tests__/datastore-stub.mjs
+# Build artefacts
+tools/.build/
+tools/codec-playground.html
+tools/.openpgp-entry.mjs
+tools/.ipgp-entry.mjs
+
+# Python
+__pycache__/
+*.egg-info/
+.pytest_cache/

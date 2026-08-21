@@ -1,0 +1,20 @@
+{
+  "name": "vencord-invisiblepgp",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Detached OpenPGP signatures hidden in invisible characters, for Vencord and Synapse",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "vectors": "vite-node tools/gen-vectors.mts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "openpgp": "^6.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

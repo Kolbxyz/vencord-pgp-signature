@@ -9,6 +9,7 @@ import { Tooltip, useEffect, useState } from "@webpack/common";
 import type { Message } from "discord-types/general";
 
 import { settings } from "../settings";
+import { getTrustedSigner } from "../trustedSigners";
 import { VerifyState, VerifyStatus } from "../types";
 import { ensureVerified, getCached, subscribe } from "../verify";
 
@@ -95,7 +96,10 @@ function SignatureBadgeInner({ message }: { message: Message; }) {
                 channelId: message.channel_id,
                 authorId: message.author?.id ?? "",
                 postedAt: Math.floor(new Date(message.timestamp as unknown as string).getTime() / 1000),
-                hintUid: message.author?.username,
+                // WKD/Keyoxide lookup keys off an *email*, which a Discord username never is.
+                // The pinned signer's OpenPGP uid does carry one, so that is the only hint worth
+                // passing; on first contact it is absent and only the by-key-id servers are tried.
+                hintUid: getTrustedSigner(message.author?.id ?? "")?.uid,
                 username: message.author?.username,
                 clockToleranceSec,
                 autoPin: autoPinSigners

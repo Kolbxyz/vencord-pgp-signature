@@ -1,76 +1,29 @@
 "use strict";
 
-/* ---- Codec: faithful port of src/plugins/invisiblePgp/zeroWidth.ts ---- */
+/* ---- Codec ----
+ *
+ * The real thing, bundled from src/plugins/invisiblePgp/ by build-playground.sh and exposed as
+ * `globalThis.ipgp`. It used to be a hand-copied port, which drifted the moment the format
+ * changed — a demo that quietly disagrees with the plugin is worse than no demo.
+ */
 
-const ALPHABET = ["​", "‌", "‍", "⁠"];
-const DIGIT_OF = new Map(ALPHABET.map((c, i) => [c, i]));
-const MAGIC = 0x01;
-const FLAG_HAS_KEY_ID = 1;
-const HEADER_LEN = 12;
-const DISCORD_MESSAGE_LIMIT = 2000;
+const { BASE4, BASE16, BASE256, DISCORD_MESSAGE_LIMIT, alphabetByName, decodeMessage, encodePayload }
+    = globalThis.ipgp;
+const { canonicalSignedText } = globalThis.ipgp;
 
-function hexToBytes(hex) {
-    const out = new Uint8Array(hex.length >> 1);
-    for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
-    return out;
-}
+/** The demo stands in for one Discord channel, so signatures are bound to a fixed context. */
+const DEMO_CONTEXT = {
+    platform: "discord",
+    conversationId: "1234567890123456789",
+    authorId: "9876543210987654321"
+};
 
-function bytesToHex(bytes) {
-    let out = "";
-    for (const b of bytes) out += b.toString(16).padStart(2, "0").toUpperCase();
-    return out;
-}
+const selectedAlphabet = () => alphabetByName($("s-alphabet")?.value ?? "base16");
 
-function encodeSignatureToZeroWidth(sigBuffer, keyId) {
-    const frame = new Uint8Array(HEADER_LEN + sigBuffer.length);
-    frame[0] = MAGIC;
-    if (keyId && /^[0-9a-fA-F]{16}$/.test(keyId)) {
-        frame[1] = FLAG_HAS_KEY_ID;
-        frame.set(hexToBytes(keyId), 2);
-    }
-    frame[10] = (sigBuffer.length >> 8) & 0xff;
-    frame[11] = sigBuffer.length & 0xff;
-    frame.set(sigBuffer, HEADER_LEN);
-
-    const out = new Array(frame.length * 4);
-    let i = 0;
-    for (const byte of frame) {
-        out[i++] = ALPHABET[(byte >> 6) & 3];
-        out[i++] = ALPHABET[(byte >> 4) & 3];
-        out[i++] = ALPHABET[(byte >> 2) & 3];
-        out[i++] = ALPHABET[byte & 3];
-    }
-    return out.join("");
-}
-
-function decodeZeroWidthToSignature(rawText) {
-    const visible = [];
-    const digits = [];
-    for (const ch of rawText) {
-        const d = DIGIT_OF.get(ch);
-        if (d === undefined) visible.push(ch);
-        else digits.push(d);
-    }
-
-    const visibleText = visible.join("");
-    if (digits.length === 0 || digits.length % 4 !== 0) return { visibleText, sigBuffer: null };
-
-    const frame = new Uint8Array(digits.length / 4);
-    for (let i = 0; i < frame.length; i++) {
-        const o = i * 4;
-        frame[i] = (digits[o] << 6) | (digits[o + 1] << 4) | (digits[o + 2] << 2) | digits[o + 3];
-    }
-
-    if (frame.length < HEADER_LEN || frame[0] !== MAGIC) return { visibleText, sigBuffer: null };
-    const sigLen = (frame[10] << 8) | frame[11];
-    if (HEADER_LEN + sigLen !== frame.length || sigLen === 0) return { visibleText, sigBuffer: null };
-
-    return {
-        visibleText,
-        sigBuffer: frame.slice(HEADER_LEN),
-        keyId: (frame[1] & FLAG_HAS_KEY_ID) ? bytesToHex(frame.subarray(2, 10)) : undefined
-    };
-}
+/** Every alphabet symbol, mapped to a colour bucket for the reveal view. */
+const SYMBOL_CLASS = new Map();
+for (const [bucket, alphabet] of [BASE4, BASE16, BASE256].entries())
+    for (const symbol of alphabet.symbols) if (!SYMBOL_CLASS.has(symbol)) SYMBOL_CLASS.set(symbol, bucket);
 
 /* ---- UI ---- */
 
@@ -87,11 +40,11 @@ function renderReveal(target, text) {
     const flush = () => { if (run) { target.appendChild(document.createTextNode(run)); run = ""; } };
 
     for (const ch of text) {
-        const d = DIGIT_OF.get(ch);
-        if (d === undefined) { run += ch; continue; }
+        const bucket = SYMBOL_CLASS.get(ch);
+        if (bucket === undefined) { run += ch; continue; }
         flush();
         const bar = document.createElement("span");
-        bar.className = "zw zw" + d;
+        bar.className = "zw zw" + bucket;
         bar.title = "U+" + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
         target.appendChild(bar);
     }
@@ -137,15 +90,20 @@ async function sign() {
             return;
         }
 
+        // What actually gets signed is the context binding, not the bare text — exactly as the
+        // plugin does it, which is what makes the "copy it elsewhere" demo below fail honestly.
+        const signedAt = Math.floor(Date.now() / 1000);
+        const ctx = { ...DEMO_CONTEXT, timestamp: signedAt };
+
         const detached = await openpgp.sign({
-            message: await openpgp.createMessage({ text }),
+            message: await openpgp.createMessage({ text: canonicalSignedText(ctx, text) }),
             signingKeys: keys.privateKey,
             detached: true,
             format: "binary"
         });
 
         const sig = new Uint8Array(detached);
-        const payload = encodeSignatureToZeroWidth(sig, keys.fingerprint.slice(-16));
+        const payload = encodePayload(sig, selectedAlphabet(), keys.fingerprint.slice(-16), signedAt);
 
         if (text.length + payload.length > DISCORD_MESSAGE_LIMIT) {
             $("s-meta").innerHTML = "<span style='color: var(--danger)'>Too long: remove "
@@ -158,7 +116,8 @@ async function sign() {
         renderReveal($("s-reveal"), signed);
         $("s-meta").innerHTML = [
             "signature <b>" + sig.length + " B</b>",
-            "<b>" + payload.length + "</b> invisible characters added",
+            "<b>" + [...payload].length + "</b> codepoints added "
+                + "(<b>" + payload.length + "</b> UTF-16 units, " + selectedAlphabet().name + ")",
             "total <b>" + signed.length + " / 2000</b>"
         ].map(x => "<span>" + x + "</span>").join("");
 
@@ -182,12 +141,12 @@ async function verify() {
     const raw = $("v-msg").value;
     if (!raw.trim()) return set("neutral", "Waiting");
 
-    const decoded = decodeZeroWidthToSignature(raw);
-    if (!decoded.sigBuffer)
+    const decoded = decodeMessage(raw);
+    if (!decoded.frame)
         return set("neutral", "Unsigned", ["No signature hidden in this message."]);
 
     try {
-        const signature = await openpgp.readSignature({ binarySignature: decoded.sigBuffer });
+        const signature = await openpgp.readSignature({ binarySignature: decoded.frame.sig });
         const publicKey = await openpgp.readKey({ armoredKey: $("v-key").value.trim() });
         const fpr = publicKey.getFingerprint().toUpperCase();
         const uid = (await publicKey.getPrimaryUser()).user.userID?.userID ?? "";
@@ -196,8 +155,14 @@ async function verify() {
         if (packetKeyId && !fpr.endsWith(packetKeyId))
             return set("bad", "Key not found", ["signed by <b>" + packetKeyId + "</b>, key given <b>" + fpr.slice(-16) + "</b>"]);
 
+        // Rebuild exactly what was signed. Without the timestamp the payload predates context
+        // binding and only covers the bare text.
+        const signedText = decoded.frame.timestamp === undefined
+            ? decoded.visibleText
+            : canonicalSignedText({ ...DEMO_CONTEXT, timestamp: decoded.frame.timestamp }, decoded.visibleText);
+
         const result = await openpgp.verify({
-            message: await openpgp.createMessage({ text: decoded.visibleText }),
+            message: await openpgp.createMessage({ text: signedText }),
             signature,
             verificationKeys: publicKey,
             expectSigned: true,
@@ -207,7 +172,8 @@ async function verify() {
 
         set("ok", "Verified \u2014 " + uid.replace(/\s*<[^>]*>\s*/, ""), [
             "fingerprint <b>" + fpr.replace(/(.{4})/g, "$1 ").trim() + "</b>",
-            "signature <b>" + decoded.sigBuffer.length + " B</b>"
+            "signature <b>" + decoded.frame.sig.length + " B</b>",
+            "alphabet <b>" + decoded.alphabet.name + "</b>"
         ]);
     } catch (e) {
         const msg = String(e.message ?? e);
@@ -221,6 +187,7 @@ $("s-run").addEventListener("click", sign);
 $("s-newkey").addEventListener("click", async () => { await newKey(); await sign(); });
 $("v-msg").addEventListener("input", verify);
 $("v-key").addEventListener("input", verify);
+$("s-alphabet").addEventListener("change", sign);
 
 $("s-copy").addEventListener("click", async () => {
     const btn = $("s-copy");

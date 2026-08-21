@@ -77,7 +77,14 @@ export interface StoredKey {
     /** ASCII-armored public key block. */
     armored: string;
     uid: string;
+    /**
+     * Full uppercase fingerprint. A key fetched from the network starts out with only the 16-hex
+     * key id here (that is all the lookup knew); `refineStoredKey` replaces it with the real
+     * fingerprint the first time openpgp.js parses the key. `provisionalFingerprint` says which.
+     */
     fingerprint: string;
+    /** True while `fingerprint` is still just the 16-hex key id and must not be shown as one. */
+    provisionalFingerprint?: boolean;
     /** Epoch millis of the last successful fetch/import. */
     fetchedAt: number;
     /** True when the user pasted it in by hand — never expires, never refetched. */

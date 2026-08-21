@@ -221,6 +221,13 @@ details > *:not(summary) { margin-top: .6rem; }
         <button class="primary" id="s-run">Sign</button>
         <button id="s-copy">Copy</button>
         <button id="s-newkey">New key</button>
+        <label class="inline">Alphabet
+            <select id="s-alphabet">
+                <option value="base16" selected>base16 &mdash; 4 bits per character</option>
+                <option value="base256">base256 &mdash; 8 bits per character</option>
+                <option value="base4">base4 &mdash; 2 bits per character (legacy)</option>
+            </select>
+        </label>
     </div>
 
     <label>Signed message &mdash; to the eye, nothing changed
