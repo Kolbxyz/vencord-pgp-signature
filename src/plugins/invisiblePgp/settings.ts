@@ -45,19 +45,6 @@ export const settings = definePluginSettings({
         description: "How long to wait for the YubiKey touch or PIN, in milliseconds",
         default: 30_000
     },
-    alphabet: {
-        type: OptionType.SELECT,
-        description: "Invisible alphabet used for outgoing signatures (all of them are read on receive)",
-        options: [
-            {
-                label: "base16 — VS1-VS16, half the characters of base4 (recommended)",
-                value: "base16",
-                default: true
-            },
-            { label: "base256 — VS1-VS256, fewest codepoints, least widely tested", value: "base256" },
-            { label: "base4 — zero-width characters, the most conservative choice", value: "base4" }
-        ]
-    },
     failClosed: {
         type: OptionType.BOOLEAN,
         description: "Cancel sending if signing fails (otherwise the message goes out unsigned)",

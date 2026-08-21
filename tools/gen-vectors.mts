@@ -148,8 +148,8 @@ codec.push({
     codec.push({
         name: "frame/unknown-flag",
         why: "Unused flag bits are rejected so that each frame has exactly one byte representation.",
-        alphabet: "base16",
-        message: "hi" + "͏" + encodeBytes(frame, ALPHABETS[1]),
+        alphabet: "base4",
+        message: "hi" + "͏" + encodeBytes(frame, ALPHABETS[0]),
         expect: null
     });
 }

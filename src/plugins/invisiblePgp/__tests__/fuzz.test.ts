@@ -20,7 +20,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-    ALPHABETS, Alphabet, ANCHOR, BASE16, buildFrame, decodeBytes, decodeMessage, encodeBytes,
+    ALPHABETS, Alphabet, ANCHOR, BASE4, buildFrame, decodeBytes, decodeMessage, encodeBytes,
     encodePayload, parseFrame
 } from "../codec";
 
@@ -194,7 +194,7 @@ describe("property: ordinary text is never modified", () => {
         const next = rng(SEED);
         for (const text of AWKWARD_TEXT) {
             const sig = randomBytes(next, 119);
-            const decoded = decodeMessage(text + encodePayload(sig, BASE16, undefined, 1787314443));
+            const decoded = decodeMessage(text + encodePayload(sig, BASE4, undefined, 1787314443));
             expect(decoded.visibleText).toBe(text);
             expect(decoded.frame!.sig).toEqual(sig);
         }

@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-    ALPHABETS, Alphabet, alphabetByName, ANCHOR, attachPayload, BASE16, BASE256, BASE4,
+    ALPHABETS, Alphabet, alphabetByName, ANCHOR, attachPayload, BASE4,
     buildFrame, decodeBytes, decodeMessage, DISCORD_MESSAGE_LIMIT, encodeBytes, encodePayload,
     FRAME_V1, FRAME_V2, hasPayload, parseFrame, PayloadTooLongError
 } from "../codec";
@@ -23,20 +23,12 @@ describe("alphabets", () => {
         for (const symbol of alphabet.symbols) expect([...symbol]).toHaveLength(1);
     });
 
-    it("overlap only where base16 sits inside base256", () => {
-        // Documenting the overlap deliberately: it is why decodeMessage resolves by trial decoding
-        // rather than by looking a character up in a single global table.
-        expect(BASE256.symbols.slice(0, 16)).toEqual([...BASE16.symbols]);
-        for (const symbol of BASE4.symbols) expect(BASE256.symbols).not.toContain(symbol);
-    });
-
     it("never uses the anchor as a symbol", () => {
         for (const alphabet of ALPHABETS) expect(alphabet.symbols).not.toContain(ANCHOR);
     });
 
-    it("resolves by name and rejects unknown names", () => {
-        expect(alphabetByName("base16")).toBe(BASE16);
-        expect(() => alphabetByName("base32" as never)).toThrow(RangeError);
+    it("resolves by name", () => {
+        expect(alphabetByName("base4")).toBe(BASE4);
     });
 });
 
@@ -52,14 +44,12 @@ describe.each(ALPHABETS)("byte codec — $name", (alphabet: Alphabet) => {
     });
 
     it("rejects a run that is not a whole number of bytes", () => {
-        if (alphabet.bitsPerSymbol === 8) return; // one symbol is already one byte
         const partial = [...encodeBytes(SIG, alphabet)].slice(0, -1).join("");
         expect(decodeBytes(partial, alphabet)).toBeNull();
     });
 
-    it("rejects a run containing a symbol from another alphabet", () => {
-        const other = ALPHABETS.find(a => a !== alphabet)!;
-        expect(decodeBytes(encodeBytes(SIG, alphabet) + other.symbols[0], alphabet)).toBeNull();
+    it("rejects an invalid character not in alphabet", () => {
+        expect(decodeBytes(encodeBytes(SIG, alphabet) + "A", alphabet)).toBeNull();
     });
 
     it("rejects an empty run", () => {
@@ -194,7 +184,7 @@ describe("decoding is conservative", () => {
 
     it("keeps an emoji intact when the message really is signed", () => {
         const text = "ends in an emoji ❤️";
-        const decoded = decodeMessage(text + encodePayload(SIG, BASE16, KEY_ID, TS));
+        const decoded = decodeMessage(text + encodePayload(SIG, BASE4, KEY_ID, TS));
         expect(decoded.visibleText).toBe(text);
         expect(decoded.frame!.sig).toEqual(SIG);
     });
@@ -203,22 +193,6 @@ describe("decoding is conservative", () => {
         const text = `a${BASE4.symbols[0]}b${BASE4.symbols[1]}c`;
         expect(decodeMessage(text).frame).toBeNull();
         expect(decodeMessage(text).visibleText).toBe(text);
-    });
-
-    it("rejects a run that mixes two alphabets", () => {
-        const mixed = "hi" + ANCHOR + encodeBytes(buildFrame(SIG, KEY_ID, TS), BASE16) + BASE256.symbols[200];
-        expect(decodeMessage(mixed).frame).toBeNull();
-    });
-
-    it("refuses a v1 frame written in a non-v1 alphabet", () => {
-        // v1, key id present, no timestamp: 2 + 8 + 2 header bytes, then the signature.
-        const v1 = new Uint8Array(12 + 4);
-        v1[0] = FRAME_V1;
-        v1[1] = 0b01;
-        new DataView(v1.buffer).setUint16(10, 4);
-        expect(parseFrame(v1)).not.toBeNull();               // the frame itself is well formed
-        expect(decodeMessage(ANCHOR + encodeBytes(v1, BASE16)).frame).toBeNull(); // but not in base16
-        expect(decodeMessage(encodeBytes(v1, BASE4)).frame).not.toBeNull();
     });
 
     it("reads a legacy base4 message that has no anchor", () => {
@@ -244,19 +218,5 @@ describe("attachPayload", () => {
 
     it("accepts a message that lands exactly on the limit", () => {
         expect(attachPayload("x".repeat(1990), "y".repeat(10))).toHaveLength(DISCORD_MESSAGE_LIMIT);
-    });
-});
-
-describe("density", () => {
-    it("costs fewer codepoints as the alphabet grows", () => {
-        const cost = (a: Alphabet) => [...encodePayload(SIG, a, KEY_ID, TS)].length;
-        expect(cost(BASE16)).toBeLessThan(cost(BASE4));
-        expect(cost(BASE256)).toBeLessThan(cost(BASE16));
-    });
-
-    it("halves the UTF-16 cost going from base4 to base16", () => {
-        const units = (a: Alphabet) => encodePayload(SIG, a, KEY_ID, TS).length;
-        // The anchor is one unit in both, hence the -1 either side.
-        expect(units(BASE16) - 1).toBe((units(BASE4) - 1) / 2);
     });
 });

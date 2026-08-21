@@ -9,15 +9,15 @@ import "./styles.css";
 import { addContextMenuPatch, NavContextMenuPatchCallback, removeContextMenuPatch } from "@api/ContextMenu";
 import { addMessagePreSendListener, removeMessagePreSendListener, MessageSendListener } from "@api/MessageEvents";
 import definePlugin from "@utils/types";
-import { Menu, showToast, Toasts, UserStore } from "@webpack/common";
+import { Menu, MessageStore, showToast, Toasts, UserStore } from "@webpack/common";
 import type { Message } from "discord-types/general";
 
 import { canonicalSignedText, isUsableContext } from "./binding";
 import { isChannelSigned, loadChannelPolicy, toggleChannelSigned } from "./channelPolicy";
 import {
-    type AlphabetName,
-    alphabetByName,
     attachPayload,
+    BASE4,
+    decodeMessage,
     encodePayload,
     hasPayload,
     PayloadTooLongError
@@ -55,12 +55,13 @@ function fail(reason: string): { cancel: boolean; } {
     return { cancel: failClosed };
 }
 
-const onBeforeSend: MessageSendListener = async (channelId, msg) => {
+const onBeforeSend: MessageSendListener = async (channelId, msg, _options, props) => {
     // Off everywhere until this channel was explicitly switched on.
     if (!isChannelSigned(channelId)) return;
 
     const content = msg.content ?? "";
-    if (!content.trim()) return;
+    const hasAttachments = Boolean(props?.hasAttachments || (props as any)?.attachments?.length || (props as any)?.hasStickers);
+    if (!content.trim() && !hasAttachments) return;
 
     // Never sign a message that already carries a payload (edits, resends, forwarded text).
     if (hasPayload(content)) return;
@@ -68,12 +69,16 @@ const onBeforeSend: MessageSendListener = async (channelId, msg) => {
     const keyId = settings.store.signingKeyId;
     if (!keyId) return fail("No signing key selected.");
 
-    Toasts.show({
-        message: "Signing — touch your YubiKey if it is blinking…",
-        id: Toasts.genId(),
-        type: Toasts.Type.MESSAGE,
-        options: { duration: settings.store.touchTimeoutMs, position: Toasts.Position.BOTTOM }
-    });
+    let toastShown = false;
+    const toastTimer = setTimeout(() => {
+        toastShown = true;
+        Toasts.show({
+            message: "Signing — touch your YubiKey if it is blinking…",
+            id: Toasts.genId(),
+            type: Toasts.Type.MESSAGE,
+            options: { duration: settings.store.touchTimeoutMs, position: Toasts.Position.BOTTOM }
+        });
+    }, 2000);
 
     // Bind the signature to where and when it is being sent, so it cannot be lifted into another
     // channel and still verify. The author id is our own — the receiver checks it against the
@@ -84,7 +89,10 @@ const onBeforeSend: MessageSendListener = async (channelId, msg) => {
         authorId: UserStore.getCurrentUser()?.id ?? "",
         timestamp: Math.floor(Date.now() / 1000)
     };
-    if (!isUsableContext(ctx)) return fail("Could not determine the channel or your own user id.");
+    if (!isUsableContext(ctx)) {
+        clearTimeout(toastTimer);
+        return fail("Could not determine the channel or your own user id.");
+    }
 
     let signing: Awaited<ReturnType<typeof Native.sign>>;
     try {
@@ -101,7 +109,10 @@ const onBeforeSend: MessageSendListener = async (channelId, msg) => {
         // silently defeating failClosed.
         return fail(`Could not reach the signing helper. ${String((e as Error)?.message ?? e)}`.trim());
     } finally {
-        Toasts.pop();
+        clearTimeout(toastTimer);
+        if (toastShown) {
+            Toasts.pop();
+        }
     }
 
     if (!signing.ok)
@@ -110,10 +121,7 @@ const onBeforeSend: MessageSendListener = async (channelId, msg) => {
     try {
         const payload = encodePayload(
             new Uint8Array(signing.sig),
-            // Vencord types a SELECT setting as a plain string; the codec validates the name and
-            // throws on anything it does not know, so a corrupted setting fails loudly here rather
-            // than silently sending an unreadable payload.
-            alphabetByName(settings.store.alphabet as AlphabetName),
+            BASE4,
             keyId.slice(-16),
             ctx.timestamp
         );
@@ -150,6 +158,8 @@ async function autoConfigure(): Promise<void> {
 }
 
 
+import { openIntegrityModal } from "./components/IntegrityModal";
+
 /** Right-click targets that carry a channel: text channels, DMs and group DMs. */
 const CHANNEL_MENUS = ["channel-context", "user-context", "gdm-context", "thread-context"];
 
@@ -174,6 +184,19 @@ const signHerePatch: NavContextMenuPatchCallback = (children, props: any) => {
     );
 };
 
+const messageMenuPatch: NavContextMenuPatchCallback = (children, props: any) => {
+    const message = props?.message;
+    if (!message) return;
+
+    children.push(
+        <Menu.MenuItem
+            id="vc-ipgp-verify-integrity"
+            label="Verify PGP Integrity"
+            action={() => openIntegrityModal(message)}
+        />
+    );
+};
+
 export default definePlugin({
     name: "InvisiblePGP",
     description:
@@ -183,18 +206,25 @@ export default definePlugin({
     dependencies: ["MessageEventsAPI", "ContextMenuAPI", "MessageDecorationsAPI", "MessageAccessoriesAPI"],
     settings,
 
+    contextMenus: {
+        "channel-context": signHerePatch,
+        "thread-context": signHerePatch,
+        "gdm-context": signHerePatch,
+        "user-context": signHerePatch,
+        "message": messageMenuPatch,
+        "message-actions": messageMenuPatch
+    },
+
     start() {
         void loadKeyring();
         void loadTrustedSigners();
         void loadChannelPolicy();
         addMessagePreSendListener(onBeforeSend);
-        for (const menu of CHANNEL_MENUS) addContextMenuPatch(menu, signHerePatch);
         void autoConfigure();
     },
 
     stop() {
         removeMessagePreSendListener(onBeforeSend);
-        for (const menu of CHANNEL_MENUS) removeContextMenuPatch(menu, signHerePatch);
         clearCache();
     },
 
@@ -202,19 +232,30 @@ export default definePlugin({
         // An edit rewrites the signed text, so the previous verdict is stale.
         MESSAGE_UPDATE({ message }: { message: Message; }) {
             if (message?.id) invalidate(message.id);
-        }
+        },
 
+        // Strip the trailing invisible signature when editing a message so the cursor lands
+        // at the end of the visible text instead of after hundreds of zero-width characters.
+        MESSAGE_START_EDIT(action: { channelId: string; messageId: string; content?: string; }) {
+            if (action.content) {
+                action.content = decodeMessage(action.content).visibleText;
+            } else if (action.channelId && action.messageId) {
+                const msg = MessageStore.getMessage(action.channelId, action.messageId);
+                if (msg?.content) {
+                    action.content = decodeMessage(msg.content).visibleText;
+                }
+            }
+        }
     },
 
     /**
-     * Rendered inline next to the message. Vencord calls this for every message it renders, so the
-     * component itself owns the caching — see verify.ts.
+     * Shown under/with the message: signature badge for this message,
+     * and an offer card when a public key is shared.
      */
-    renderMessageDecoration: (props: { message: Message; }) => <SignatureBadge message={props.message} />,
-
-    /**
-     * Shown under a message carrying a public key: an offer to import it and to start signing in
-     * this conversation. Buttons only -- the plugin never acts on an incoming key by itself.
-     */
-    renderMessageAccessory: (props: { message: Message; }) => <PublicKeyOffer message={props.message} />
+    renderMessageAccessory: (props: { message: Message; }) => (
+        <>
+            <SignatureBadge message={props.message} />
+            <PublicKeyOffer message={props.message} />
+        </>
+    )
 });

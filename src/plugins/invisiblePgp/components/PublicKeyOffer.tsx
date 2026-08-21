@@ -11,6 +11,7 @@ import { isChannelSigned, setChannelSigned } from "../channelPolicy";
 import { storeKey } from "../keyResolver";
 import { fetchArmoredKey, findKeyAttachment, findPublicKeyBlock } from "../publicKeyDetection";
 import { settings } from "../settings";
+import { pinSigner } from "../trustedSigners";
 import { clearCache, parseArmoredKey } from "../verify";
 
 /**
@@ -42,6 +43,19 @@ function PublicKeyOfferInner({ message }: { message: any; }) {
 
             const { fingerprint, uid } = await parseArmoredKey(armored);
             await storeKey({ armored, fingerprint, uid, fetchedAt: Date.now(), manual: true });
+
+            if (message.author?.id) {
+                await pinSigner(message.author.id, {
+                    fingerprint,
+                    keyId: fingerprint.slice(-16),
+                    uid: uid || "",
+                    username: message.author.username || "",
+                    addedAt: Date.now(),
+                    lastSeenAt: Date.now(),
+                    source: "manual"
+                });
+            }
+
             clearCache(); // re-verify messages already on screen against the new key
             setImported(uid || fingerprint);
         } catch (e) {

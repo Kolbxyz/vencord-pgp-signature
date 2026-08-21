@@ -17,7 +17,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import { __reset } from "../../../../test/stubs/DataStore";
 import { canonicalSignedText, MessageContext } from "../binding";
-import { BASE16, encodePayload, FRAME_V1 } from "../codec";
+import { BASE4, encodePayload, FRAME_V1 } from "../codec";
 import { getKeyring, removeKey, storeKey } from "../keyResolver";
 import { getTrustedSigners, unpinSigner } from "../trustedSigners";
 import { VerifyStatus } from "../types";
@@ -88,7 +88,7 @@ const context = (over: Partial<MessageContext> = {}): MessageContext => ({
 /** Builds a signed message exactly as index.tsx would. */
 async function signedMessage(identity: Identity, text: string, ctx = context()): Promise<string> {
     const sig = await detachedSign(identity, canonicalSignedText(ctx, text));
-    return text + encodePayload(sig, BASE16, identity.keyId, ctx.timestamp);
+    return text + encodePayload(sig, BASE4, identity.keyId, ctx.timestamp);
 }
 
 const request = (content: string, over: Partial<VerifyRequest> = {}): VerifyRequest => ({
@@ -184,7 +184,7 @@ describe("a signature that does not hold up", () => {
         // a key other than the one that signed. It must not be quietly ignored.
         const ctx = context();
         const sig = await detachedSign(alice, canonicalSignedText(ctx, "hello"));
-        const message = "hello" + encodePayload(sig, BASE16, mallory.keyId, ctx.timestamp);
+        const message = "hello" + encodePayload(sig, BASE4, mallory.keyId, ctx.timestamp);
 
         const state = await verdict(request(message));
         expect(state.status).toBe(VerifyStatus.Invalid);
@@ -234,7 +234,7 @@ describe("key trouble", () => {
     });
 
     it("is Error for a payload that is not a signature packet at all", async () => {
-        const junk = "hello" + encodePayload(new Uint8Array(80).fill(0x42), BASE16, alice.keyId, NOW);
+        const junk = "hello" + encodePayload(new Uint8Array(80).fill(0x42), BASE4, alice.keyId, NOW);
         expect((await verdict(request(junk))).status).toBe(VerifyStatus.Error);
     });
 });

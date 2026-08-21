@@ -48,45 +48,25 @@ const SIG_LEN_LEN = 2;
 export const ANCHOR = "͏";
 
 export interface Alphabet {
-    readonly name: "base4" | "base16" | "base256";
-    readonly bitsPerSymbol: 2 | 4 | 8;
-    /** Index in this array *is* the digit. Length is always 2 ** bitsPerSymbol. */
+    readonly name: "base4";
+    readonly bitsPerSymbol: 2;
+    /** Index in this array *is* the digit. Length is always 4. */
     readonly symbols: readonly string[];
 }
 
-function range(start: number, count: number): string[] {
-    return Array.from({ length: count }, (_, i) => String.fromCodePoint(start + i));
-}
-
-/** ZWSP, ZWNJ, ZWJ, WORD JOINER. */
+/** ZWSP, ZWNJ, ZWJ, WORD JOINER. The only zero-width set that survives Discord. */
 export const BASE4: Alphabet = {
     name: "base4",
     bitsPerSymbol: 2,
-    symbols: ["​", "‌", "‍", "⁠"]
+    symbols: ["\u200B", "\u200C", "\u200D", "\u2060"]
 };
 
-/** VS1-VS16. All BMP, one UTF-16 unit each. */
-export const BASE16: Alphabet = {
-    name: "base16",
-    bitsPerSymbol: 4,
-    symbols: range(0xFE00, 16)
-};
-
-/** VS1-VS256. The first 16 are BMP; VS17-VS256 are astral and cost two UTF-16 units. */
-export const BASE256: Alphabet = {
-    name: "base256",
-    bitsPerSymbol: 8,
-    symbols: [...range(0xFE00, 16), ...range(0xE0100, 240)]
-};
-
-export const ALPHABETS = [BASE4, BASE16, BASE256] as const;
+export const ALPHABETS = [BASE4] as const;
 
 export type AlphabetName = Alphabet["name"];
 
-export function alphabetByName(name: AlphabetName): Alphabet {
-    const found = ALPHABETS.find(a => a.name === name);
-    if (!found) throw new RangeError(`Unknown alphabet: ${name}`);
-    return found;
+export function alphabetByName(_name?: string): Alphabet {
+    return BASE4;
 }
 
 /**
@@ -345,8 +325,26 @@ export function decodeMessage(text: string): DecodedMessage {
 }
 
 /** Builds the invisible run to append to a message. */
-export function encodePayload(sig: Uint8Array, alphabet: Alphabet, keyId?: string, timestamp?: number): string {
-    return ANCHOR + encodeBytes(buildFrame(sig, keyId, timestamp), alphabet);
+export function encodePayload(
+    sig: Uint8Array,
+    alphabetOrKeyId?: Alphabet | string,
+    keyIdOrTs?: string | number,
+    timestamp?: number
+): string {
+    let alphabet: Alphabet = BASE4;
+    let keyId: string | undefined;
+    let ts: number | undefined;
+
+    if (typeof alphabetOrKeyId === "object" && alphabetOrKeyId !== null && "symbols" in alphabetOrKeyId) {
+        alphabet = alphabetOrKeyId;
+        keyId = typeof keyIdOrTs === "string" ? keyIdOrTs : undefined;
+        ts = timestamp;
+    } else {
+        keyId = typeof alphabetOrKeyId === "string" ? alphabetOrKeyId : undefined;
+        ts = typeof keyIdOrTs === "number" ? keyIdOrTs : undefined;
+    }
+
+    return ANCHOR + encodeBytes(buildFrame(sig, keyId, ts), alphabet);
 }
 
 /**

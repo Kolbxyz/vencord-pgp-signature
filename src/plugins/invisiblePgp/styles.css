@@ -1,15 +1,35 @@
+[class*="messageListItem"]:has([id^="message-accessories-"] > .vc-ipgp-badge) [class*="contents_"],
+[class*="message_"]:has([id^="message-accessories-"] > .vc-ipgp-badge) [class*="contents_"] {
+    display: inline !important;
+}
+
+[id^="message-content-"] {
+    display: inline !important;
+}
+
+[id^="message-accessories-"]:has(> .vc-ipgp-badge:only-child) {
+    display: inline !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    vertical-align: middle;
+}
+
 .vc-ipgp-badge {
     display: inline-flex;
     align-items: center;
-    margin-left: 0.35rem;
-    padding: 0 0.3rem;
-    border-radius: 3px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    line-height: 1.2rem;
-    vertical-align: middle;
-    cursor: help;
+    justify-content: center;
+    margin-left: 6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
     user-select: none;
+    vertical-align: middle;
 }
 
 .vc-ipgp-valid {

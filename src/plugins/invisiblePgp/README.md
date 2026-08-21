@@ -44,12 +44,12 @@ Detection is local and synchronous: an attachment is recognised by its name, and
 | | |
 |---|---|
 | Signing | `gpg --detach-sign` in Electron's main process → `gpg-agent` → YubiKey touch/PIN |
-| Encoding | `base16` over VS1–VS16 by default; `base4` and `base256` also available |
+| Encoding | `base4` zero-width characters (`U+200B`, `U+200C`, `U+200D`, `U+2060`) with `U+034F` anchor |
 | Verification | `openpgp.js`, in the renderer, loaded lazily |
 | Public keys | local keyring (DataStore) → WKD → Keyoxide → keys.openpgp.org → keyserver.ubuntu.com |
 
 A real Ed25519 signature from gpg is **119 bytes** — OpenPGP packet included — which comes to
-**271 invisible characters** in `base16` with context binding. The plugin refuses to send past
+**541 invisible zero-width characters** in `base4` with context binding. The plugin refuses to send past
 Discord's 2000 character limit and says how many characters to cut.
 
 ### Payload frame
@@ -126,7 +126,7 @@ Automatic pinning can be turned off, and the list is editable by hand in the set
 | `trustedSigners.ts` | pinned keys per account, trust-on-first-use, key substitution checks |
 | `verify.ts` | openpgp.js, context checks, per-message cache, deduplicated verifications |
 | `keyResolver.ts` | DataStore keyring, WKD (z-base-32/SHA-1), negative cache |
-| `components/` | inline badge, public key offer card, settings UI |
+| `components/` | inline badge, Integrity Modal dialog, public key offer card, settings UI |
 
 ## Test benches (`tools/`, outside Vencord)
 

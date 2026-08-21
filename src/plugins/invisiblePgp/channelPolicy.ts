@@ -35,6 +35,10 @@ export function isChannelSigned(channelId: string): boolean {
     return Boolean(enabled[channelId]);
 }
 
+export function getChannelSignedSince(channelId: string): number | undefined {
+    return enabled[channelId];
+}
+
 async function persist(): Promise<void> {
     await DataStore.set(STORE_KEY, enabled);
 }
