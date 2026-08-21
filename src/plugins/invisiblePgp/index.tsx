@@ -7,7 +7,7 @@
 import "./styles.css";
 
 import { addContextMenuPatch, NavContextMenuPatchCallback, removeContextMenuPatch } from "@api/ContextMenu";
-import { addPreSendListener, removePreSendListener, MessageSendListener } from "@api/MessageEvents";
+import { addMessagePreSendListener, removeMessagePreSendListener, MessageSendListener } from "@api/MessageEvents";
 import definePlugin from "@utils/types";
 import { Menu, showToast, Toasts, UserStore } from "@webpack/common";
 import type { Message } from "discord-types/general";
@@ -187,13 +187,13 @@ export default definePlugin({
         void loadKeyring();
         void loadTrustedSigners();
         void loadChannelPolicy();
-        addPreSendListener(onBeforeSend);
+        addMessagePreSendListener(onBeforeSend);
         for (const menu of CHANNEL_MENUS) addContextMenuPatch(menu, signHerePatch);
         void autoConfigure();
     },
 
     stop() {
-        removePreSendListener(onBeforeSend);
+        removeMessagePreSendListener(onBeforeSend);
         for (const menu of CHANNEL_MENUS) removeContextMenuPatch(menu, signHerePatch);
         clearCache();
     },

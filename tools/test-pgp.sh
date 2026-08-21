@@ -8,8 +8,32 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 export GNUPGHOME="${GNUPGHOME:-$PWD/test-gpghome}"
-KEYID="${1:-$(gpg --with-colons --list-secret-keys 2>/dev/null | awk -F: '$1=="fpr"{print substr($10,length($10)-15); exit}')}"
-[[ -n "$KEYID" ]] || { echo "No secret key in $GNUPGHOME" >&2; exit 1; }
+mkdir -p "$GNUPGHOME" && chmod 700 "$GNUPGHOME"
+
+# `|| true` is load-bearing: gpg exits 2 when the keyring is empty, and under `set -euo pipefail`
+# that would kill the script here rather than letting it generate the key it is about to need.
+find_key() {
+    gpg --batch --with-colons --list-secret-keys 2>/dev/null \
+        | awk -F: '$1=="fpr"{print substr($10,length($10)-15); exit}' \
+        || true
+}
+
+KEYID="${1:-$(find_key)}"
+
+if [[ -z "$KEYID" ]]; then
+    echo "No secret key in $GNUPGHOME — generating a throwaway one."
+
+    # --pinentry-mode loopback with an empty --passphrase is what makes this work with no
+    # controlling terminal: otherwise gpg-agent reaches for a pinentry program and dies with
+    # "Inappropriate ioctl for device". It also matters later — a key created *without* it holds an
+    # agent-managed passphrase, so even signing needs a pinentry and fails on a headless machine.
+    gpg --batch --no-tty --yes \
+        --pinentry-mode loopback --passphrase '' \
+        --quick-generate-key "InvisiblePGP Test <test@example.org>" ed25519 sign never
+
+    KEYID="$(find_key)"
+    [[ -n "$KEYID" ]] || { echo "gpg could not generate a test key" >&2; exit 1; }
+fi
 
 MSG="${2:-Hello, this message is signed. Emoji: 🔐🗝️ and a heart ❤️}"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
