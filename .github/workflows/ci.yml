@@ -59,12 +59,8 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - name: Generate a throwaway signing key
-        run: |
-          export GNUPGHOME="$PWD/tools/test-gpghome"
-          mkdir -p "$GNUPGHOME" && chmod 700 "$GNUPGHOME"
-          gpg --batch --no-tty --yes --quick-generate-key \
-            "InvisiblePGP CI <ci@example.org>" ed25519 sign never
+      # The script generates its own throwaway key when the keyring is empty, with the loopback
+      # pinentry flags a runner needs. Duplicating that here would only let the two drift apart.
       - name: Sign, encode, decode, verify — every alphabet
         run: GNUPGHOME="$PWD/tools/test-gpghome" tools/test-pgp.sh
 

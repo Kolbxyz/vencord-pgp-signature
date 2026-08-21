@@ -38,11 +38,22 @@ class SigningKey:
 def _generate(home: Path, name: str) -> str:
     home.mkdir(parents=True, exist_ok=True)
     home.chmod(0o700)
-    subprocess.run(
+    # --pinentry-mode loopback with an empty --passphrase keeps gpg-agent from reaching for a
+    # pinentry program. Without it, key generation dies with "Inappropriate ioctl for device" on
+    # any machine that has no controlling terminal — which is every CI runner.
+    result = subprocess.run(
         [GPG, "--homedir", str(home), "--batch", "--no-tty", "--yes",
+         "--pinentry-mode", "loopback", "--passphrase", "",
          "--quick-generate-key", f"{name} <{name}@example.org>", "ed25519", "sign", "never"],
-        capture_output=True, check=True,
+        capture_output=True, check=False,
     )
+    if result.returncode != 0:
+        # check=True would hide gpg's own diagnosis behind a bare CalledProcessError, and gpg puts
+        # the only useful part of the story on stderr.
+        raise AssertionError(
+            f"gpg could not generate a test key (exit {result.returncode}):\n"
+            + result.stderr.decode("utf-8", "replace")
+        )
     listing = subprocess.run(
         [GPG, "--homedir", str(home), "--batch", "--with-colons", "--list-secret-keys"],
         capture_output=True, check=True, text=True,
