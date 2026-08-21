@@ -94,11 +94,15 @@ const onBeforeSend: MessageSendListener = async (channelId, msg, _options, props
         return fail("Could not determine the channel or your own user id.");
     }
 
+    // If the message ends with a URL (e.g. Tenor GIF, Giphy, media link), append a space to the text
+    // before signing so Discord's URL regex parser terminates the link and embeds the GIF/video properly.
+    const textToSign = (content && /https?:\/\/[^\s]+$/.test(content)) ? content + " " : content;
+
     let signing: Awaited<ReturnType<typeof Native.sign>>;
     try {
         // Awaiting here does not block the UI thread: gpg runs in the main process.
         signing = await Native.sign(
-            canonicalSignedText(ctx, content),
+            canonicalSignedText(ctx, textToSign),
             keyId,
             settings.store.touchTimeoutMs,
             settings.store.gpgPath
@@ -125,7 +129,7 @@ const onBeforeSend: MessageSendListener = async (channelId, msg, _options, props
             keyId.slice(-16),
             ctx.timestamp
         );
-        msg.content = attachPayload(content, payload);
+        msg.content = attachPayload(textToSign, payload);
     } catch (e) {
         if (e instanceof PayloadTooLongError)
             return fail(`Too long once signed: remove ${e.overflow} characters.`);
