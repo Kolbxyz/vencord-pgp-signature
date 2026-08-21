@@ -1,0 +1,7 @@
+# GnuPG test keyring -- holds a passphrase-less PRIVATE KEY.
+# Must never be committed.
+tools/test-gpghome/
+
+node_modules/
+tools/.zeroWidth.build.mjs
+src/plugins/invisiblePgp/__tests__/zeroWidth.mjs

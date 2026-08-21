@@ -1,0 +1,40 @@
+.vc-ipgp-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.35rem;
+    padding: 0 0.3rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.2rem;
+    vertical-align: middle;
+    cursor: help;
+    user-select: none;
+}
+
+.vc-ipgp-valid {
+    color: var(--text-positive, #3ba55d);
+    background: color-mix(in srgb, var(--text-positive, #3ba55d) 15%, transparent);
+}
+
+.vc-ipgp-invalid {
+    color: var(--text-danger, #ed4245);
+    background: color-mix(in srgb, var(--text-danger, #ed4245) 15%, transparent);
+}
+
+.vc-ipgp-unknown {
+    color: var(--text-warning, #faa81a);
+    background: color-mix(in srgb, var(--text-warning, #faa81a) 15%, transparent);
+}
+
+.vc-ipgp-pending {
+    color: var(--text-muted, #949ba4);
+    opacity: 0.7;
+}
+
+/* Deliberately near-invisible: it is a neutral default, not a warning. */
+.vc-ipgp-unsigned {
+    color: var(--text-muted, #949ba4);
+    font-weight: 400;
+    opacity: 0.45;
+}

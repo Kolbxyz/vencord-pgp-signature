@@ -1,0 +1,259 @@
+<title>Zero-Width Codec</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=JetBrains+Mono:wght@400;700&display=swap">
+
+<style>
+:root {
+    --bg: #f5f7f5;
+    --panel: #ffffff;
+    --ink: #17211c;
+    --muted: #64756c;
+    --line: #dbe3de;
+    --line-strong: #c3cec8;
+    --accent: #2f6b4f;
+    --accent-soft: #e4efe8;
+    --danger: #a53f2c;
+    --danger-soft: #f6e5e1;
+    --g0: #2f6b4f;
+    --g1: #b07d2b;
+    --g2: #3f6ea8;
+    --g3: #8e4a86;
+    --shadow: 0 1px 2px rgb(23 33 28 / 6%);
+    color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --bg: #0f1512;
+        --panel: #161d19;
+        --ink: #e4ebe6;
+        --muted: #8b9c92;
+        --line: #26312b;
+        --line-strong: #35443c;
+        --accent: #6dbd93;
+        --accent-soft: #1b2a22;
+        --danger: #e3907e;
+        --danger-soft: #2c1c19;
+        --g0: #6dbd93;
+        --g1: #d9ac5c;
+        --g2: #7aa8dd;
+        --g3: #c087b8;
+        --shadow: none;
+        color-scheme: dark;
+    }
+}
+
+:root[data-theme="dark"] {
+    --bg: #0f1512;
+    --panel: #161d19;
+    --ink: #e4ebe6;
+    --muted: #8b9c92;
+    --line: #26312b;
+    --line-strong: #35443c;
+    --accent: #6dbd93;
+    --accent-soft: #1b2a22;
+    --danger: #e3907e;
+    --danger-soft: #2c1c19;
+    --g0: #6dbd93;
+    --g1: #d9ac5c;
+    --g2: #7aa8dd;
+    --g3: #c087b8;
+    --shadow: none;
+    color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 2.5rem 1.25rem 5rem;
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 15px/1.55 "IBM Plex Sans", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 46rem; margin: 0 auto; display: flex; flex-direction: column; gap: 1.75rem; }
+
+header { display: flex; flex-direction: column; gap: .4rem; }
+
+h1 {
+    margin: 0;
+    font: 700 1.35rem/1.2 "JetBrains Mono", ui-monospace, monospace;
+    letter-spacing: -0.02em;
+}
+
+.lede { margin: 0; max-width: 60ch; color: var(--muted); }
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: .9rem;
+    padding: 1.25rem;
+}
+
+h2 {
+    margin: 0;
+    font: 700 1rem/1.2 "IBM Plex Sans", sans-serif;
+    letter-spacing: -0.01em;
+}
+
+.step {
+    display: inline-block;
+    margin-right: .5rem;
+    padding: .05rem .4rem;
+    border-radius: 2px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font: 700 .78rem/1.4 "JetBrains Mono", ui-monospace, monospace;
+}
+
+label { display: flex; flex-direction: column; gap: .35rem; font-size: .8rem; color: var(--muted); }
+
+textarea {
+    width: 100%;
+    padding: .6rem .7rem;
+    background: var(--bg);
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    font: 400 13px/1.5 "JetBrains Mono", ui-monospace, monospace;
+    resize: vertical;
+}
+
+textarea:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+
+button {
+    padding: .45rem .8rem;
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    font: 600 .82rem/1.4 "IBM Plex Sans", sans-serif;
+    cursor: pointer;
+}
+
+button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+button.primary:hover:not(:disabled) { color: var(--panel); filter: brightness(1.08); }
+
+.meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .3rem 1.1rem;
+    margin: 0;
+    font: 400 .78rem/1.4 "JetBrains Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+}
+
+.meta b { color: var(--ink); font-weight: 700; }
+
+.verdict {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: .3rem .6rem;
+    border-radius: 3px;
+    font: 600 .9rem/1.4 "IBM Plex Sans", sans-serif;
+}
+
+.verdict.ok { background: var(--accent-soft); color: var(--accent); }
+.verdict.bad { background: var(--danger-soft); color: var(--danger); }
+.verdict.neutral { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+
+details { font-size: .8rem; color: var(--muted); }
+summary { cursor: pointer; }
+details > *:not(summary) { margin-top: .6rem; }
+
+.reveal {
+    max-height: 10rem;
+    overflow: auto;
+    padding: .6rem .7rem;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    font: 400 13px/1.9 "JetBrains Mono", ui-monospace, monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.zw { display: inline-block; width: .34em; height: 1em; margin: 0 .04em; border-radius: 1px; vertical-align: -.13em; }
+.zw0 { background: var(--g0); }
+.zw1 { background: var(--g1); }
+.zw2 { background: var(--g2); }
+.zw3 { background: var(--g3); }
+
+.legend { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .74rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: .35rem; }
+.legend i { width: .34rem; height: .8rem; border-radius: 1px; }
+
+@media (prefers-reduced-motion: no-preference) {
+    button { transition: color .12s ease, border-color .12s ease, filter .12s ease; }
+}
+</style>
+
+<div class="wrap">
+<header>
+    <h1>Zero-Width Codec</h1>
+    <p class="lede">Sign a message, then verify it. The OpenPGP signature hides inside the text as invisible characters &mdash; exactly what the InvisiblePGP plugin does in Discord.</p>
+</header>
+
+<section class="panel">
+    <h2><span class="step">1</span>Sign</h2>
+    <p class="meta" id="key-info"></p>
+
+    <label>Your message
+        <textarea id="s-msg" rows="3">Hello, this message is signed.</textarea>
+    </label>
+
+    <div class="row">
+        <button class="primary" id="s-run">Sign</button>
+        <button id="s-copy">Copy</button>
+        <button id="s-newkey">New key</button>
+    </div>
+
+    <label>Signed message &mdash; to the eye, nothing changed
+        <textarea id="s-out" rows="3" readonly></textarea>
+    </label>
+    <p class="meta" id="s-meta"></p>
+
+    <details>
+        <summary>Show the invisible characters</summary>
+        <div class="reveal" id="s-reveal"></div>
+        <div class="legend">
+            <span><i style="background: var(--g0)"></i> ZWSP</span>
+            <span><i style="background: var(--g1)"></i> ZWNJ</span>
+            <span><i style="background: var(--g2)"></i> ZWJ</span>
+            <span><i style="background: var(--g3)"></i> WJ</span>
+        </div>
+    </details>
+</section>
+
+<section class="panel">
+    <h2><span class="step">2</span>Verify</h2>
+    <p class="lede" style="font-size:.85rem">The signed message lands here on its own. Change one character and the verdict flips, just like the plugin badge on a tampered message.</p>
+
+    <label>Received message
+        <textarea id="v-msg" rows="3"></textarea>
+    </label>
+
+    <span class="verdict neutral" id="v-verdict">Waiting</span>
+    <p class="meta" id="v-meta"></p>
+
+    <details>
+        <summary>Public key used to verify</summary>
+        <textarea id="v-key" rows="4" spellcheck="false"></textarea>
+    </details>
+</section>
+</div>
