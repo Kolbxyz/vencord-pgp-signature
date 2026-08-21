@@ -5,8 +5,8 @@
  */
 
 import { canonicalSignedText, isUsableContext, MessageContext } from "./binding";
-import { decodeZeroWidthToSignature } from "./zeroWidth";
-import { resolvePublicKey, ResolverOptions } from "./keyResolver";
+import { decodeMessage, Frame } from "./codec";
+import { refineStoredKey, resolvePublicKey, ResolverOptions } from "./keyResolver";
 import { getTrustedSigner, recordVerified } from "./trustedSigners";
 import { VerifyState, VerifyStatus } from "./types";
 
@@ -86,12 +86,12 @@ export interface VerifyRequest {
 }
 
 export function ensureVerified(req: VerifyRequest, opts: ResolverOptions): VerifyState {
-    const { messageId, content, hintUid } = req;
+    const { messageId, content } = req;
     const cached = cache.get(messageId);
     if (cached) return cached;
 
-    const decoded = decodeZeroWidthToSignature(content);
-    if (!decoded.sigBuffer) {
+    const decoded = decodeMessage(content);
+    if (!decoded.frame) {
         // The whole point of tracking signers: from someone who always signs, silence is the signal.
         const pinned = getTrustedSigner(req.authorId);
         return publish(messageId, pinned
@@ -103,36 +103,38 @@ export function ensureVerified(req: VerifyRequest, opts: ResolverOptions): Verif
             : { status: VerifyStatus.Unsigned });
     }
 
+    const { frame } = decoded;
+
     if (!inflight.has(messageId)) {
-        const task = runVerification(req, decoded.visibleText, decoded.sigBuffer, decoded.keyId, decoded.timestamp, opts)
+        const task = runVerification(req, decoded.visibleText, frame, opts)
             .catch<VerifyState>(e => ({ status: VerifyStatus.Error, reason: String(e?.message ?? e) }))
             .then(state => {
                 inflight.delete(messageId);
-                return publish(messageId, { keyId: decoded.keyId, ...state });
+                return publish(messageId, { keyId: frame.keyId, ...state });
             });
         inflight.set(messageId, task);
     }
 
-    return publish(messageId, { status: VerifyStatus.Pending, keyId: decoded.keyId, signedAt: decoded.timestamp });
+    return publish(messageId, { status: VerifyStatus.Pending, keyId: frame.keyId, signedAt: frame.timestamp });
 }
 
 async function runVerification(
     req: VerifyRequest,
     visibleText: string,
-    sigBuffer: Uint8Array,
-    keyId: string | undefined,
-    timestamp: number | undefined,
+    frame: Frame,
     opts: ResolverOptions
 ): Promise<VerifyState> {
     const openpgp = await getOpenPGP();
     const { hintUid } = req;
+    const { sig: sigBuffer, keyId, timestamp } = frame;
 
     // What the sender actually signed. Without a timestamp the payload predates context binding
     // and only covers the bare text — it cannot be tied to this channel, author or moment.
     let signedText = visibleText;
     if (timestamp !== undefined) {
         const ctx: Partial<MessageContext> = {
-            channelId: req.channelId,
+            platform: "discord",
+            conversationId: req.channelId,
             authorId: req.authorId,
             timestamp
         };
@@ -149,7 +151,8 @@ async function runVerification(
             };
         }
 
-        signedText = canonicalSignedText(ctx, visibleText);
+        // The canonical form is tied to the frame version, so old signatures keep verifying.
+        signedText = canonicalSignedText(ctx, visibleText, frame.version);
     }
 
     let signature: import("openpgp").Signature;
@@ -165,6 +168,18 @@ async function runVerification(
     if (!lookupId)
         return { status: VerifyStatus.UnknownKey, reason: "Signature carries no key id." };
 
+    // The header hint is attacker-controlled and is what drives key *lookup*. If it disagrees with
+    // the signature packet, someone is steering us at a different key than the one that signed —
+    // so refuse rather than quietly trusting the packet and verifying against the wrong identity.
+    if (packetKeyId && keyId && packetKeyId !== keyId) {
+        return {
+            status: VerifyStatus.Invalid,
+            keyId: packetKeyId,
+            signedAt: timestamp,
+            reason: "The key id in the payload header does not match the one in the signature."
+        };
+    }
+
     const stored = await resolvePublicKey(lookupId, hintUid, opts);
     if (!stored)
         return { status: VerifyStatus.UnknownKey, keyId: lookupId };
@@ -178,6 +193,10 @@ async function runVerification(
 
     const fingerprint = publicKey.getFingerprint().toUpperCase();
     const uid = stored.uid || (await safePrimaryUid(publicKey));
+
+    // A key fetched by key id was stored with a provisional fingerprint. Now that it is parsed,
+    // write the real one back so the keyring UI and TOFU pinning compare like with like.
+    if (stored.provisionalFingerprint) void refineStoredKey(lookupId, fingerprint, uid);
 
     try {
         const result = await openpgp.verify({

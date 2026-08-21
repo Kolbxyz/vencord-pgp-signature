@@ -8,13 +8,20 @@ import "./styles.css";
 
 import { addContextMenuPatch, NavContextMenuPatchCallback, removeContextMenuPatch } from "@api/ContextMenu";
 import { addPreSendListener, removePreSendListener, MessageSendListener } from "@api/MessageEvents";
-import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { Menu, showToast, Toasts, UserStore } from "@webpack/common";
 import type { Message } from "discord-types/general";
 
 import { canonicalSignedText, isUsableContext } from "./binding";
 import { isChannelSigned, loadChannelPolicy, toggleChannelSigned } from "./channelPolicy";
+import {
+    type AlphabetName,
+    alphabetByName,
+    attachPayload,
+    encodePayload,
+    hasPayload,
+    PayloadTooLongError
+} from "./codec";
 import { PublicKeyOffer } from "./components/PublicKeyOffer";
 import { SignatureBadge } from "./components/SignatureBadge";
 import { loadKeyring } from "./keyResolver";
@@ -23,12 +30,12 @@ import { isDesktop, Native } from "./native.bridge";
 import { settings } from "./settings";
 import { GpgErrorCode } from "./types";
 import { clearCache, invalidate } from "./verify";
-import {
-    attachPayload,
-    encodeSignatureToZeroWidth,
-    hasZeroWidthPayload,
-    PayloadTooLongError
-} from "./zeroWidth";
+
+/**
+ * Not in Vencord's `Devs` table — this plugin is maintained outside the main repo, so it carries
+ * its own author record. Replace `id` with the maintainer's Discord id before upstreaming.
+ */
+const AUTHOR = { name: "kolbxyz", id: 0n } as const;
 
 const ERROR_MESSAGES: Record<GpgErrorCode, string> = {
     [GpgErrorCode.NoGpg]: "gpg not found. Install GnuPG or fix its path in the settings.",
@@ -56,7 +63,7 @@ const onBeforeSend: MessageSendListener = async (channelId, msg) => {
     if (!content.trim()) return;
 
     // Never sign a message that already carries a payload (edits, resends, forwarded text).
-    if (hasZeroWidthPayload(content)) return;
+    if (hasPayload(content)) return;
 
     const keyId = settings.store.signingKeyId;
     if (!keyId) return fail("No signing key selected.");
@@ -72,7 +79,8 @@ const onBeforeSend: MessageSendListener = async (channelId, msg) => {
     // channel and still verify. The author id is our own — the receiver checks it against the
     // rendered message, which is why it does not need to travel inside the payload.
     const ctx = {
-        channelId,
+        platform: "discord" as const,
+        conversationId: channelId,
         authorId: UserStore.getCurrentUser()?.id ?? "",
         timestamp: Math.floor(Date.now() / 1000)
     };
@@ -87,6 +95,11 @@ const onBeforeSend: MessageSendListener = async (channelId, msg) => {
             settings.store.touchTimeoutMs,
             settings.store.gpgPath
         );
+    } catch (e) {
+        // The IPC call itself failed (native helper missing on a web build, main process threw).
+        // Without this the rejection escapes onBeforeSend and the message is sent unsigned,
+        // silently defeating failClosed.
+        return fail(`Could not reach the signing helper. ${String((e as Error)?.message ?? e)}`.trim());
     } finally {
         Toasts.pop();
     }
@@ -95,7 +108,15 @@ const onBeforeSend: MessageSendListener = async (channelId, msg) => {
         return fail(`${ERROR_MESSAGES[signing.code]} ${signing.error}`.trim());
 
     try {
-        const payload = encodeSignatureToZeroWidth(new Uint8Array(signing.sig), keyId.slice(-16), ctx.timestamp);
+        const payload = encodePayload(
+            new Uint8Array(signing.sig),
+            // Vencord types a SELECT setting as a plain string; the codec validates the name and
+            // throws on anything it does not know, so a corrupted setting fails loudly here rather
+            // than silently sending an unreadable payload.
+            alphabetByName(settings.store.alphabet as AlphabetName),
+            keyId.slice(-16),
+            ctx.timestamp
+        );
         msg.content = attachPayload(content, payload);
     } catch (e) {
         if (e instanceof PayloadTooLongError)
@@ -158,8 +179,8 @@ export default definePlugin({
     description:
         "Signs your messages with a detached OpenPGP signature hidden in invisible characters, and "
         + "verifies everyone else's. Signing is delegated to gpg-agent, so hardware keys work.",
-    authors: [Devs.Ven],
-    dependencies: ["MessageEventsAPI"],
+    authors: [AUTHOR],
+    dependencies: ["MessageEventsAPI", "ContextMenuAPI", "MessageDecorationsAPI", "MessageAccessoriesAPI"],
     settings,
 
     start() {

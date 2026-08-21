@@ -1,15 +1,22 @@
 # InvisiblePGP
 
-Detached OpenPGP signatures, hidden inside the message as zero-width characters.
+Detached OpenPGP signatures, hidden inside the message as invisible characters.
 
 ## Install
 
+Custom plugins need a Vencord built from source — a prebuilt one has its plugin list fixed at build
+time. Full walkthrough in the [repository README](../../../README.md#install); the short version:
+
 ```bash
 git clone https://github.com/Vendicated/Vencord
-cd Vencord && pnpm i && pnpm add openpgp
-cp -r <this-folder> src/plugins/invisiblePgp
-pnpm build --dev && pnpm inject      # Vencord Desktop is required to sign
+cd Vencord && pnpm install --frozen-lockfile && pnpm add openpgp
+mkdir -p src/userplugins
+cp -r <this-folder> src/userplugins/invisiblePgp
+pnpm build && pnpm inject            # Discord Desktop or Vesktop is required to sign
 ```
+
+`src/userplugins/` is the directory Vencord reserves for third-party plugins; it is absent from a
+fresh checkout.
 
 Then, in Discord, right-click a channel or a DM and pick **"Sign messages here"**. Signing is off
 everywhere until you do that, per conversation.
@@ -37,24 +44,38 @@ Detection is local and synchronous: an attachment is recognised by its name, and
 | | |
 |---|---|
 | Signing | `gpg --detach-sign` in Electron's main process → `gpg-agent` → YubiKey touch/PIN |
-| Encoding | base-4 over ZWSP / ZWNJ / ZWJ / WORD JOINER, 2 bits per character |
+| Encoding | `base16` over VS1–VS16 by default; `base4` and `base256` also available |
 | Verification | `openpgp.js`, in the renderer, loaded lazily |
 | Public keys | local keyring (DataStore) → WKD → Keyoxide → keys.openpgp.org → keyserver.ubuntu.com |
 
 A real Ed25519 signature from gpg is **119 bytes** — OpenPGP packet included — which comes to
-**540 invisible characters** with context binding. The plugin refuses to send past Discord's 2000
-character limit and says how many characters to cut.
+**271 invisible characters** in `base16` with context binding. The plugin refuses to send past
+Discord's 2000 character limit and says how many characters to cut.
 
 ### Payload frame
 
 ```
-magic(1) | flags(1) | keyId(8) | [timestamp(4)] | sigLen(2, big-endian) | detached signature
+v2:  magic(1)=0x02 | flags(1) | [keyId(8)] | [timestamp(4)] | sigLen(2, BE) | detached signature
+v1:  magic(1)=0x01 | flags(1) |  keyId(8)  | [timestamp(4)] | sigLen(2, BE) | detached signature
 ```
 
-The timestamp is present only when the `HAS_CONTEXT` flag bit is set.
+Optional fields are present only when their flag bit is set; v1 reserved the key-id bytes
+unconditionally, which v2 stopped doing. v1 frames are still read, so messages signed before the
+change keep verifying.
 
-The magic byte and the `sigLen == remainder` check are what keep a stray zero-width character —
-from another plugin, or a copy-paste — from being read as a signature.
+Three checks keep a stray invisible character — from another plugin, or a copy-paste — from being
+read as a signature: the magic byte, `sigLen == remainder`, and rejecting any flag bit that has no
+meaning. That last one also means each frame has exactly one byte representation, so a relay cannot
+reword one without changing what it decodes to.
+
+### Why decoding is careful about emoji
+
+The payload is a **contiguous run at the very end** of the message, preceded by a U+034F anchor —
+never "every alphabet character wherever it appears". U+FE0F is both a `base16` symbol and the emoji
+presentation selector, so a global strip would quietly rewrite any `❤️` (U+2764 U+FE0F) you actually
+typed. If the trailing run does not parse as a frame, the message is returned **untouched**.
+
+Full format: [`../../../SPEC.md`](../../../SPEC.md).
 
 ## Context binding
 
@@ -63,11 +84,15 @@ signed message can be copied into another channel, where it verifies perfectly a
 had been written there. So the plugin signs a canonical form (`binding.ts`):
 
 ```
-ipgp1 \n <channelId> \n <authorId> \n <unix timestamp> \n <visible text>
+ipgp2 \n <len>:<platform> \n <len>:<conversationId> \n <len>:<authorId> \n <len>:<timestamp> \n <len>:<attachment> \n <visible text>
 ```
 
-The free-form text comes last and every field before it is digits only: no user content can inject
-a delimiter and shift the field boundaries.
+Every field before the text is length-prefixed (UTF-8 bytes), so no user content can inject a
+delimiter and shift the boundaries — and the free-form text comes last, where it cannot shift one
+either. `platform` is bound too, so a Discord signature cannot be replayed on Matrix.
+
+The earlier `ipgp1` form relied on every field being digits-only, which held for Discord snowflakes
+but not for Matrix ids like `!room:server`. It is still accepted for v1 frames, never emitted.
 
 Only the timestamp travels in the payload (4 bytes). The channel and author are read back off the
 rendered message — which is exactly what makes a relocated copy fail to reproduce the signed string.
@@ -94,8 +119,8 @@ Automatic pinning can be turned off, and the list is editable by hand in the set
 | `index.tsx` | plugin definition, send listener, message decoration |
 | `native.ts` | main process: gpg detection, `spawn(gpg)`, YubiKey timeout, `--with-colons` parsing |
 | `native.bridge.ts` | renderer-side view of the native module; degrades cleanly off Desktop |
-| `zeroWidth.ts` | `encodeSignatureToZeroWidth` / `decodeZeroWidthToSignature`, frame, length guard |
-| `binding.ts` | canonical signed form: channel + author + timestamp + text |
+| `codec.ts` | the three invisible alphabets, the frame, and the trailing-run rules |
+| `binding.ts` | canonical signed form: platform + conversation + author + timestamp + attachment + text |
 | `channelPolicy.ts` | which channels signing is switched on for |
 | `publicKeyDetection.ts` | spotting a shared public key, inline or as an attachment |
 | `trustedSigners.ts` | pinned keys per account, trust-on-first-use, key substitution checks |
@@ -109,11 +134,14 @@ Automatic pinning can be turned off, and the list is editable by hand in the set
 |---|---|
 | `test-pgp.sh` | the full chain: gpg signs → codec → decode → gpg re-verifies, plus a negative control |
 | `verify-openpgp.mjs` | the plugin's real inbound path, verified by openpgp.js |
-| `codec-playground.html` | web page: sign and verify in the browser |
+| `build-playground.sh` | builds `codec-playground.html`: sign and verify in the browser |
+| `roundtrip-probe.mjs` | emits one probe per alphabet, then reports which survived a real platform |
+| `gen-vectors.mts` | regenerates `tests/vectors.json`, the cross-language contract |
 | `test-gpghome/` | isolated keyring holding an Ed25519 test key (`rm -rf` to wipe it) |
 | `test-yubikey.sh` | the same, against Windows gpg and a physical YubiKey |
 
-The scripts transpile `zeroWidth.ts` on the fly: they test the source, not a copy of it.
+Every one of these bundles the real modules rather than a copy, so a bench cannot pass while the
+plugin is broken.
 
 ## Handled errors
 
@@ -141,8 +169,9 @@ prove, not your everyday conversation.
 
 ## Known limitations
 
-- The signature covers the **visible text only**: not attachments, not embeds.
-- A client that strips zero-width characters (some bots, Matrix/IRC bridges) breaks the signature;
+- On Discord the signature covers the **visible text only**: not attachments, not embeds. (On
+  Matrix the media reference *is* bound — see [`../../../SPEC.md`](../../../SPEC.md) §5.)
+- A client that strips invisible characters (some bots, IRC bridges) breaks the signature;
   the message stays readable and the badge turns red.
 - `renderMessageDecoration` is a recent Vencord API. On a fork that does not expose it, swap in
   `renderMessageAccessory` (badge shown below the message) in `index.tsx`.

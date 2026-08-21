@@ -56,6 +56,29 @@ export async function storeKey(key: StoredKey): Promise<void> {
     await persist();
 }
 
+/**
+ * Writes back the real fingerprint (and uid) once the key has been parsed.
+ *
+ * Keys fetched by key id are stored with a provisional 16-hex "fingerprint"; leaving it there
+ * would show a truncated key id in the keyring UI and, worse, let TOFU pinning compare a key id
+ * against a real fingerprint. Indexed by key id, so the entry does not move.
+ */
+export async function refineStoredKey(keyId: string, fingerprint: string, uid?: string): Promise<void> {
+    await loadKeyring();
+    const id = keyId.toUpperCase();
+    const entry = keyring[id];
+    if (!entry) return;
+
+    const full = fingerprint.toUpperCase();
+    const changed = entry.fingerprint !== full || (uid && entry.uid !== uid);
+    if (!changed) return;
+
+    entry.fingerprint = full;
+    entry.provisionalFingerprint = false;
+    if (uid) entry.uid = uid;
+    await persist();
+}
+
 export async function removeKey(keyId: string): Promise<void> {
     await loadKeyring();
     delete keyring[keyId.toUpperCase()];
@@ -119,7 +142,10 @@ async function lookupOnline(keyId: string, hintUid?: string): Promise<StoredKey 
             return {
                 armored,
                 uid: hintUid ?? "",
-                fingerprint: keyId, // refined by verify.ts once openpgp.js parses the key
+                // A keyserver lookup by key id tells us nothing about the full fingerprint; it is
+                // filled in by refineStoredKey once openpgp.js has actually parsed the key.
+                fingerprint: keyId,
+                provisionalFingerprint: true,
                 fetchedAt: Date.now(),
                 manual: false
             };
@@ -142,7 +168,7 @@ function* candidateUrls(keyId: string, email: string | null): Generator<string> 
     yield `https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x${keyId}`;
 }
 
-/** Placeholder until the async hash resolves — see resolveWkdUrls. */
+/** Builds a WKD URL with the hashed local part left as a {HU:...} marker — see expandHuMarker. */
 function wkdUrl(domain: string, local: string, advanced: boolean): string {
     const host = advanced ? `openpgpkey.${domain}` : domain;
     const path = advanced ? `/.well-known/openpgpkey/${domain}/hu/` : "/.well-known/openpgpkey/hu/";
@@ -175,6 +201,12 @@ async function tryFetchKey(url: string): Promise<string | null> {
     }
 }
 
+/**
+ * The pure helpers below (`zbase32Sha1`, `armor`, `crc24`, `extractEmail`) are exported so they
+ * can be checked against the published WKD and RFC 4880 vectors — getting any of them subtly
+ * wrong produces a lookup that silently never resolves.
+ */
+
 /** Replaces a `{HU:localpart}` marker with its z-base-32(sha1(lowercased localpart)) form. */
 async function expandHuMarker(url: string): Promise<string | null> {
     const m = url.match(/\{HU:([^}]*)\}/);
@@ -186,9 +218,10 @@ async function expandHuMarker(url: string): Promise<string | null> {
     }
 }
 
+/** z-base-32 alphabet, as WKD uses it (RFC 6189 §4.5.2 ordering, not RFC 4648). */
 const ZBASE32 = "ybndrfg8ejkmcpqxot1uwisza345h769";
 
-async function zbase32Sha1(input: string): Promise<string> {
+export async function zbase32Sha1(input: string): Promise<string> {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-1", new TextEncoder().encode(input)));
 
     let out = "";
@@ -208,7 +241,7 @@ async function zbase32Sha1(input: string): Promise<string> {
 }
 
 /** RFC 4880 radix-64 wrapper, CRC24 checksum included — openpgp.js rejects armor without it. */
-function armor(bytes: Uint8Array): string {
+export function armor(bytes: Uint8Array): string {
     let bin = "";
     for (const b of bytes) bin += String.fromCharCode(b);
 
@@ -218,7 +251,7 @@ function armor(bytes: Uint8Array): string {
     return `-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n${b64}\n=${checksum}\n-----END PGP PUBLIC KEY BLOCK-----\n`;
 }
 
-function crc24(bytes: Uint8Array): [number, number, number] {
+export function crc24(bytes: Uint8Array): [number, number, number] {
     let crc = 0xb704ce;
     for (const byte of bytes) {
         crc ^= byte << 16;
@@ -231,7 +264,7 @@ function crc24(bytes: Uint8Array): [number, number, number] {
     return [(crc >> 16) & 0xff, (crc >> 8) & 0xff, crc & 0xff];
 }
 
-function extractEmail(uid?: string): string | null {
+export function extractEmail(uid?: string): string | null {
     if (!uid) return null;
     const m = uid.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
     return m ? m[0].toLowerCase() : null;

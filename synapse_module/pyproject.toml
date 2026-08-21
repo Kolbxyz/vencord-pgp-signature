@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "invisible-pgp-synapse"
+version = "0.2.0"
+description = "Synapse module that strips unsigned links and media from your own account's messages"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+# No runtime dependencies on purpose: this loads into a homeserver process, where every extra
+# package is one more thing that can pull in a CVE. gpg is invoked as a subprocess.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[tool.setuptools.packages.find]
+include = ["invisible_pgp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+asyncio_mode = "auto"
+filterwarnings = ["error"]

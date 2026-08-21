@@ -1,9 +1,0 @@
-{
-  "name": "invisiblepgp-tools",
-  "private": true,
-  "type": "module",
-  "description": "Bancs d'essai hors Vencord pour le plugin InvisiblePGP",
-  "devDependencies": {
-    "openpgp": "^6.0.0"
-  }
-}

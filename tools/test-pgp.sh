@@ -1,48 +1,77 @@
 #!/usr/bin/env bash
-# The plugin's full chain, without Discord: gpg signs -> zero-width codec -> gpg re-verifies.
+# The plugin's full chain, without Discord:
+#   gpg signs the canonical string -> codec -> codec -> gpg re-verifies.
+#
+# Runs once per alphabet, because the codec is the part that changed and the point of the script is
+# that all three round-trip through a real signature identically.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 export GNUPGHOME="${GNUPGHOME:-$PWD/test-gpghome}"
-KEYID="${1:-$(gpg --with-colons --list-secret-keys "InvisiblePGP Test" 2>/dev/null | awk -F: '$1=="fpr"{print substr($10,length($10)-15); exit}')}"
+KEYID="${1:-$(gpg --with-colons --list-secret-keys 2>/dev/null | awk -F: '$1=="fpr"{print substr($10,length($10)-15); exit}')}"
 [[ -n "$KEYID" ]] || { echo "No secret key in $GNUPGHOME" >&2; exit 1; }
 
-MSG="${2:-Hello, this message is signed. Emoji: 🔐🗝️}"
+MSG="${2:-Hello, this message is signed. Emoji: 🔐🗝️ and a heart ❤️}"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 
 echo "keyring : $GNUPGHOME"
 echo "key     : $KEYID"
 echo
 
-# The plugin's codec, transpiled from the TypeScript source -- not a parallel copy.
-npx --yes esbuild ../src/plugins/invisiblePgp/zeroWidth.ts --format=esm --outfile=.zeroWidth.build.mjs --log-level=warning
+# The plugin's own modules, transpiled from source — not a parallel copy.
+mkdir -p .build
+# --bundle, not plain transpile: the sources import each other without file extensions, which
+# node's ESM resolver will not follow.
+npx --yes esbuild ../src/plugins/invisiblePgp/codec.ts ../src/plugins/invisiblePgp/binding.ts \
+    --bundle --format=esm --outdir=.build --out-extension:.js=.mjs --log-level=warning
 
 printf '%s' "$MSG" > "$T/msg.txt"
 
-echo "== 1. Detached signature (the exact arguments native.ts uses) =="
-gpg --batch --no-tty --yes --detach-sign --digest-algo SHA512 \
-    --local-user "$KEYID" --output "$T/sig.bin" < "$T/msg.txt"
-echo "   ok"
+for ALPHABET in base4 base16 base256; do
+    echo "== $ALPHABET =="
 
-echo "== 2. Zero-width encoding =="
-node pgp-roundtrip.mjs encode "$T/msg.txt" "$T/sig.bin" "$KEYID" "$T/signed.txt"
+    echo " 1. canonical signed string"
+    node pgp-roundtrip.mjs canonical "$T/msg.txt" "$T/canonical.txt"
 
-echo "== 3. Decoding =="
-node pgp-roundtrip.mjs decode "$T/signed.txt" "$T/visible.txt" "$T/sig2.bin"
+    echo " 2. detached signature (the exact arguments native.ts uses)"
+    gpg --batch --no-tty --yes --detach-sign --digest-algo SHA512 \
+        --local-user "$KEYID" --output "$T/sig.bin" < "$T/canonical.txt"
+    echo "   ok"
 
-cmp -s "$T/msg.txt" "$T/visible.txt" && echo "   visible text identical to the original" || { echo "   !! visible text altered" >&2; exit 1; }
-cmp -s "$T/sig.bin" "$T/sig2.bin"    && echo "   signature identical byte for byte"  || { echo "   !! signature altered" >&2; exit 1; }
+    echo " 3. encoding"
+    node pgp-roundtrip.mjs encode "$T/msg.txt" "$T/sig.bin" "$KEYID" "$ALPHABET" "$T/signed.txt"
 
-echo "== 4. gpg verification of the extracted signature =="
-gpg --verify "$T/sig2.bin" "$T/visible.txt" 2>&1 | sed 's/^/   /'
+    echo " 4. decoding"
+    node pgp-roundtrip.mjs decode "$T/signed.txt" "$T/visible.txt" "$T/sig2.bin"
 
-echo "== 5. Negative control -- tampered message =="
-sed 's/Bonjour/Bonsoir/' "$T/visible.txt" > "$T/tampered.txt"
-if gpg --verify "$T/sig2.bin" "$T/tampered.txt" >/dev/null 2>&1; then
-    echo "   !! an invalid signature was accepted" >&2; exit 1
-else
-    echo "   signature rejected on the modified message -- as expected"
-fi
+    cmp -s "$T/msg.txt" "$T/visible.txt" || { echo "   !! visible text altered" >&2; exit 1; }
+    cmp -s "$T/sig.bin" "$T/sig2.bin"    || { echo "   !! signature altered" >&2; exit 1; }
+    echo "   visible text and signature both identical"
 
-echo
-echo "Full chain verified: gpg -> zero-width -> gpg."
+    echo " 5. gpg verification, against the rebuilt canonical string"
+    node pgp-roundtrip.mjs canonical "$T/visible.txt" "$T/canonical2.txt"
+    gpg --verify "$T/sig2.bin" "$T/canonical2.txt" 2>&1 | sed 's/^/   /'
+
+    echo " 6. negative control: one flipped byte in the signed data"
+    # Flip the final byte rather than substituting words: a text-substitution control silently
+    # stops testing anything the moment the sample message changes.
+    head -c -1 "$T/canonical2.txt" > "$T/tampered.txt"
+    printf 'X' >> "$T/tampered.txt"
+    cmp -s "$T/canonical2.txt" "$T/tampered.txt" && { echo "   !! control did not modify anything" >&2; exit 1; }
+
+    if gpg --verify "$T/sig2.bin" "$T/tampered.txt" >/dev/null 2>&1; then
+        echo "   !! an invalid signature was accepted" >&2; exit 1
+    fi
+    echo "   tampered data rejected — as expected"
+
+    echo " 7. negative control: a different channel"
+    IPGP_TIMESTAMP=1787314443 node pgp-roundtrip.mjs canonical "$T/visible.txt" "$T/canonical3.txt"
+    sed -i 's/1234567890123456789/1111111111111111111/' "$T/canonical3.txt"
+    if gpg --verify "$T/sig2.bin" "$T/canonical3.txt" >/dev/null 2>&1; then
+        echo "   !! a message lifted into another channel was accepted" >&2; exit 1
+    fi
+    echo "   relocated message rejected — context binding works"
+    echo
+done
+
+echo "Full chain verified for all three alphabets: gpg -> codec -> codec -> gpg."

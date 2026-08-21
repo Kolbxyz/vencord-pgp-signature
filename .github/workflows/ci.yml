@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  typescript:
+    name: TypeScript — typecheck and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Test vectors are in step with the source
+        # The vectors are committed rather than generated at test time, so that a change to the
+        # wire format shows up in review. This proves nobody edited one side without the other.
+        run: |
+          npm run vectors
+          git diff --exit-code tests/vectors.json \
+            || { echo "::error::tests/vectors.json is stale — run 'npm run vectors' and commit the result"; exit 1; }
+
+  python:
+    name: Python — Synapse module
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        working-directory: synapse_module
+        run: pip install -e ".[test]"
+      - name: Confirm gpg is available
+        # The suite skips its gpg tests when the binary is missing, so check rather than assume:
+        # a silently skipped crypto suite is worse than a failing one.
+        run: gpg --version
+      - name: Tests
+        working-directory: synapse_module
+        run: pytest -q
+
+  end-to-end:
+    name: Full chain — gpg to codec and back
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Generate a throwaway signing key
+        run: |
+          export GNUPGHOME="$PWD/tools/test-gpghome"
+          mkdir -p "$GNUPGHOME" && chmod 700 "$GNUPGHOME"
+          gpg --batch --no-tty --yes --quick-generate-key \
+            "InvisiblePGP CI <ci@example.org>" ed25519 sign never
+      - name: Sign, encode, decode, verify — every alphabet
+        run: GNUPGHOME="$PWD/tools/test-gpghome" tools/test-pgp.sh
+
+  cross-language:
+    name: Both implementations agree on the vectors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - run: npx vitest run src/plugins/invisiblePgp/__tests__/vectors.test.ts
+      - working-directory: synapse_module
+        run: |
+          pip install -e ".[test]"
+          pytest tests/test_vectors.py -q
